@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Текст и Время</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        button { padding: 10px 20px; margin: 10px; font-size: 18px; }
+        .time { color: gray; font-size: 14px; }
+        ul { list-style-type: none; padding: 0; }
+        li { margin: 5px 0; }
+    </style>
+</head>
+<body>
+
+    <h1 id="displayText">Нажми "Далее"</h1>
+    <p class="time" id="timeInfo"></p>
+
+    <button onclick="nextText()">Далее</button>
+    <button onclick="resetText()">Начать сначала</button>
+
+    <h2>История:</h2>
+    <ul id="historyList"></ul>
+
+    <script>
+        let texts = ["Friedenstrasse", "Lutherberg", "Nahrungsberg", "Berliner Platz", "Marktplatz", "Behordenzentrum", "Landgericht", "Steinstrasse"];
+        let index = 0;
+        let historyList = document.getElementById("historyList");
+
+        function nextText() {
+            if (index < texts.length) {
+                let now = new Date();
+                let timeStr = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
+                
+                document.getElementById("displayText").textContent = texts[index];
+                document.getElementById("timeInfo").textContent = "Нажато в " + timeStr;
+                
+                let listItem = document.createElement("li");
+                listItem.textContent = texts[index] + " (время: " + timeStr + ")";
+                historyList.appendChild(listItem);
+                
+                index++;
+            }
+        }
+
+        function resetText() {
+            index = 0;
+            document.getElementById("displayText").textContent = "Нажми 'Далее'";
+            document.getElementById("timeInfo").textContent = "";
+            historyList.innerHTML = "";
+        }
+    </script>
+
+</body>
+</html>
