@@ -10,28 +10,78 @@
         .time { color: gray; font-size: 14px; }
         ul { list-style-type: none; padding: 0; }
         li { margin: 5px 0; }
+        #loginForm { display: block; }
+        #mainContent { display: none; }
     </style>
 </head>
 <body>
 
-    <h1 id="displayText">Нажми "Далее"</h1>
-    <p class="time" id="timeInfo"></p>
+    <!-- Форма входа -->
+    <div id="loginForm">
+        <h2>Вход</h2>
+        <input type="text" id="username" placeholder="Имя пользователя"><br><br>
+        <input type="password" id="password" placeholder="Пароль"><br><br>
+        <button onclick="login()">Войти</button>
+        <p id="loginError" style="color: red;"></p>
+    </div>
 
-    <button onclick="nextText()">Далее</button>
-    <button onclick="resetText()">Начать сначала</button>
+    <!-- Основной контент (скрыт до входа) -->
+    <div id="mainContent">
+        <h1 id="displayText">Нажми "Далее"</h1>
+        <p class="time" id="timeInfo"></p>
 
-    <h2>История:</h2>
-    <ul id="historyList"></ul>
+        <button onclick="nextText()">Далее</button>
+        <button onclick="resetText()">Начать сначала</button>
+
+        <h2>История:</h2>
+        <ul id="historyList"></ul>
+    </div>
 
     <script>
-        let texts = ["Friedhof", "Albert-Osswald-Platz", "Weidigstrasse", "Am Eichelbaum", "Grabenstrasse", "Rodering", "Feuerbachstrasse", "Theodor-Litt-Schule", "Steinstrasse", "Landgericht", "Behordenzentrum", "Marktplatz", "Berliner Platz", "Nahrungsberg", "Lutherberg", "Friedenstrasse"];
+        let texts = ["Friedhof", "Albert-Osswalds-Platz", "Weidigstrasse", "Am Eichelbaum", "Grabenstrasse", "Rodering", "Feurbachstrasse", "Theodor-Litt-Schule", "Steinstrasse", "Landgericht", "Behordenzentrum", "Berliner Platz", "Wolfstrasse", "Volkshalle"];
         let index = 0;
         let historyList = document.getElementById("historyList");
 
-        // Функция для озвучки текста
+        // Список пользователей (пароли можно изменить)
+        let users = {
+            "admin": "admin123", 
+            "Alla": "pass1",
+            "Dima": "pass2",
+            "matvei": "pass3",
+            "user4": "pass4",
+            "user5": "pass5"
+        };
+
+        let currentUser = null;
+
+        // Проверяем, есть ли пользователь в localStorage (автоматический вход)
+        if (localStorage.getItem("currentUser")) {
+            currentUser = localStorage.getItem("currentUser");
+            showMainContent();
+        }
+
+        function login() {
+            let username = document.getElementById("username").value;
+            let password = document.getElementById("password").value;
+
+            if (users[username] && users[username] === password) {
+                currentUser = username;
+                localStorage.setItem("currentUser", currentUser);
+                showMainContent();
+            } else {
+                document.getElementById("loginError").textContent = "Неверный логин или пароль!";
+            }
+        }
+
+        function showMainContent() {
+            document.getElementById("loginForm").style.display = "none";
+            document.getElementById("mainContent").style.display = "block";
+            loadHistory();
+        }
+
         function speak(text) {
             let utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'de-DE'; // Устанавливаем немецкий язык
+            utterance.lang = 'de-DE';
             speechSynthesis.speak(utterance);
         }
 
@@ -43,24 +93,43 @@
                 document.getElementById("displayText").textContent = texts[index];
                 document.getElementById("timeInfo").textContent = "Нажато в " + timeStr;
 
-                // Озвучка: вначале "Nächster Haltestelle"
                 speak("Nächster Haltestelle");
-                // Затем текст, который отображается
                 speak(texts[index]);
-                
-                let listItem = document.createElement("li");
-                listItem.textContent = texts[index] + " (время: " + timeStr + ")";
-                historyList.appendChild(listItem);
-                
+
+                let record = { user: currentUser, text: texts[index], time: timeStr };
+
+                // Загружаем историю из localStorage
+                let history = JSON.parse(localStorage.getItem("history")) || [];
+                history.push(record);
+                localStorage.setItem("history", JSON.stringify(history));
+
+                updateHistoryList();
                 index++;
             }
         }
-
-        function resetText() {
+function resetText() {
             index = 0;
             document.getElementById("displayText").textContent = "Нажми 'Далее'";
             document.getElementById("timeInfo").textContent = "";
+            localStorage.setItem("history", JSON.stringify([]));
+            updateHistoryList();
+        }
+
+        function loadHistory() {
+            updateHistoryList();
+        }
+
+        function updateHistoryList() {
             historyList.innerHTML = "";
+            let history = JSON.parse(localStorage.getItem("history")) || [];
+
+            history.forEach(entry => {
+                if (currentUser === "admin" || entry.user === currentUser) {
+                    let listItem = document.createElement("li");
+                    listItem.textContent = ${entry.user}: ${entry.text} (время: ${entry.time});
+                    historyList.appendChild(listItem);
+                }
+            });
         }
     </script>
 
