@@ -62,7 +62,7 @@ function brightness() {
 setInterval(() => {
     if (video.readyState !== 4) return;
     const b = brightness();
-    if (b < 60) {
+    if (b < 99) {
         status.textContent = "Объект ОЧЕНЬ близко";
         if (!playing) {
             beep.play();
