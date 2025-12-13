@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Camera Proximity Beep</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { background:black;color:white;text-align:center;font-family:sans-serif; }
+video { width:100%;max-width:400px;margin-top:10px; }
+#status { font-size:20px;margin-top:10px; }
+</style>
+</head>
+<body>
+<h2>Поднеси объект к камере</h2>
+<video id="video" autoplay playsinline></video>
+<div id="status">Ожидание камеры...</div>
+<audio id="beep" src="beep.mp3" loop></audio>
+<canvas id="canvas" width="160" height="120" style="display:none;"></canvas>
+<script>
+const video=document.getElementById("video");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const beep=document.getElementById("beep");
+const status=document.getElementById("status");
+let playing=false;
+
+navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+.then(stream=>{video.srcObject=stream;status.textContent="Камера включена";})
+.catch(()=>status.textContent="Нет доступа к камере");
+
+function sharpness(){
+ctx.drawImage(video,0,0,canvas.width,canvas.height);
+const d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+let diff=0;
+for(let i=0;i<d.length-4;i+=4){diff+=Math.abs(d[i]-d[i+4]);}
+return diff/d.length;
+}
+
+setInterval(()=>{
+if(video.readyState!==4)return;
+const s=sharpness();
+if(s>25){
+status.textContent="Объект ОЧЕНЬ близко";
+if(!playing){beep.play();playing=true;}
+}else{
+status.textContent="Объект далеко";
+if(playing){beep.pause();beep.currentTime=0;playing=false;}
+}
+},300);
+</script>
+</body>
+</html>
