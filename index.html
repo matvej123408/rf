@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Giessen Bus Map — PWA (Demo)</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Giessen — автобусы (демо)</h1>
+      <div id="controls">
+        <select id="mode">
+          <option value="simulate">Simulation (demo)</option>
+        </select>
+        <button id="startSim">Start</button>
+        <button id="stopSim">Stop</button>
+      </div>
+    </header>
+
+    <div id="map"></div>
+    <footer>
+      <small>Демо-режим: симуляция маршрута. Для подключения реального API RMV требуется API-ключ и серверный прокси.</small>
+    </footer>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js').catch(console.error);
+    }
+  </script>
+</body>
+</html>
