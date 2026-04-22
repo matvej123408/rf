@@ -11,16 +11,28 @@ let running = false;
 let model;
 let busy = false;
 
+// 🔥 сглаживание расстояния
+let smoothDistance = 0;
+
+// камера режим
+let isFrontCamera = false;
+let stream = null;
+
 // загрузка модели
 async function loadModel() {
   model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
-  console.log("Model loaded");
 }
 
-// камера
+// 📷 камера (переключаемая)
 async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" }
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+  }
+
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: isFrontCamera ? "user" : "environment"
+    }
   });
 
   video.srcObject = stream;
@@ -30,7 +42,13 @@ async function startCamera() {
     canvas.height = video.videoHeight / 2;
   };
 
-  await loadModel();
+  if (!model) await loadModel();
+}
+
+// 🔄 переключение камеры
+async function toggleCamera() {
+  isFrontCamera = !isFrontCamera;
+  await startCamera();
 }
 
 // кнопки
@@ -44,10 +62,11 @@ function toggleMeasure() {
 
 function resetAll() {
   running = false;
+  smoothDistance = 0;
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
 
-// главный цикл
+// 🔥 основной цикл
 async function loop() {
   if (!running) return;
 
@@ -65,40 +84,40 @@ async function loop() {
 
     predictions.forEach(p => {
       if (p.score > 0.6) {
+
         let [x, y, w, h] = p.bbox;
 
-        // масштаб под canvas
         x /= 2; y /= 2; w /= 2; h /= 2;
 
-        // рамка
         ctx.strokeStyle = "red";
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, w, h);
 
-        // текст
         ctx.fillStyle = "red";
         ctx.fillText(p.class, x, y - 5);
 
-        // расстояние
-        let distance = 200 / w;
+        // 📏 raw distance
+        let rawDistance = 200 / w;
+
+        // 🔥 СГЛАЖИВАНИЕ (очень важно)
+        smoothDistance = smoothDistance * 0.8 + rawDistance * 0.2;
 
         document.getElementById("distance").innerText =
-          p.class + " ≈ " + distance.toFixed(2) + " m";
+          p.class + " ≈ " + smoothDistance.toFixed(2) + " m";
 
-        // 🔥 логика парктроника
-        handleAlerts(distance);
+        handleAlerts(smoothDistance);
       }
     });
 
   } catch (e) {
-    console.error(e);
+    console.log(e);
   }
 
   busy = false;
   setTimeout(loop, 120);
 }
 
-// логика сигналов
+// 🚗 логика парктроника
 function handleAlerts(distance) {
   if (distance < 1) {
     alertStrong();
@@ -107,7 +126,6 @@ function handleAlerts(distance) {
   }
 }
 
-// < 1 метр
 function alertStrong() {
   if (soundOn) {
     sound.currentTime = 0;
@@ -115,11 +133,10 @@ function alertStrong() {
   }
 
   if (vibrationOn && navigator.vibrate) {
-    navigator.vibrate([100, 50, 100]);
+    navigator.vibrate([120, 50, 120]);
   }
 }
 
-// 1–2 метра
 function alertMedium() {
   if (soundOn) {
     sound.currentTime = 0;
