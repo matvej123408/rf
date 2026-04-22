@@ -9,11 +9,11 @@ let vibrationOn = false;
 let running = false;
 
 let model;
-let busy = false; // 🔥 защита от лагов
+let busy = false;
 
 // загрузка модели
 async function loadModel() {
-  model = await cocoSsd.load();
+  model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
   console.log("Model loaded");
 }
 
@@ -26,7 +26,6 @@ async function startCamera() {
   video.srcObject = stream;
 
   video.onloadedmetadata = () => {
-    // уменьшаем разрешение → быстрее
     canvas.width = video.videoWidth / 2;
     canvas.height = video.videoHeight / 2;
   };
@@ -48,11 +47,10 @@ function resetAll() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
 
-// 🔥 главный цикл (НЕ requestAnimationFrame)
+// главный цикл
 async function loop() {
   if (!running) return;
 
-  // если модель занята → пропускаем кадр
   if (busy) {
     setTimeout(loop, 50);
     return;
@@ -69,23 +67,26 @@ async function loop() {
       if (p.score > 0.6) {
         let [x, y, w, h] = p.bbox;
 
-        // масштаб под уменьшенный canvas
+        // масштаб под canvas
         x /= 2; y /= 2; w /= 2; h /= 2;
 
+        // рамка
         ctx.strokeStyle = "red";
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, w, h);
 
+        // текст
         ctx.fillStyle = "red";
         ctx.fillText(p.class, x, y - 5);
 
-        // стабильнее расстояние
+        // расстояние
         let distance = 200 / w;
 
         document.getElementById("distance").innerText =
           p.class + " ≈ " + distance.toFixed(2) + " m";
 
-        alertUser();
+        // 🔥 логика парктроника
+        handleAlerts(distance);
       }
     });
 
@@ -94,19 +95,38 @@ async function loop() {
   }
 
   busy = false;
-
-  // 🔥 задержка = стабильность
   setTimeout(loop, 120);
 }
 
-// сигнал
-function alertUser() {
+// логика сигналов
+function handleAlerts(distance) {
+  if (distance < 1) {
+    alertStrong();
+  } else if (distance < 2) {
+    alertMedium();
+  }
+}
+
+// < 1 метр
+function alertStrong() {
   if (soundOn) {
     sound.currentTime = 0;
     sound.play();
   }
 
   if (vibrationOn && navigator.vibrate) {
-    navigator.vibrate(80);
+    navigator.vibrate([100, 50, 100]);
+  }
+}
+
+// 1–2 метра
+function alertMedium() {
+  if (soundOn) {
+    sound.currentTime = 0;
+    sound.play();
+  }
+
+  if (vibrationOn && navigator.vibrate) {
+    navigator.vibrate(100);
   }
 }
