@@ -11,28 +11,23 @@ let running = false;
 let model;
 let busy = false;
 
-// 🔥 сглаживание расстояния
 let smoothDistance = 0;
 
-// камера режим
-let isFrontCamera = false;
-let stream = null;
+// 📌 анти-дребезг вибрации
+let lastVibrateTime = 0;
+
+// 📌 выбранный объект (самый большой)
+let trackedObject = null;
 
 // загрузка модели
 async function loadModel() {
   model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
 }
 
-// 📷 камера (переключаемая)
+// камера
 async function startCamera() {
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-  }
-
-  stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: isFrontCamera ? "user" : "environment"
-    }
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" }
   });
 
   video.srcObject = stream;
@@ -43,12 +38,6 @@ async function startCamera() {
   };
 
   if (!model) await loadModel();
-}
-
-// 🔄 переключение камеры
-async function toggleCamera() {
-  isFrontCamera = !isFrontCamera;
-  await startCamera();
 }
 
 // кнопки
@@ -63,10 +52,11 @@ function toggleMeasure() {
 function resetAll() {
   running = false;
   smoothDistance = 0;
+  trackedObject = null;
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
 
-// 🔥 основной цикл
+// 🔥 главный цикл
 async function loop() {
   if (!running) return;
 
@@ -82,32 +72,44 @@ async function loop() {
 
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    predictions.forEach(p => {
-      if (p.score > 0.6) {
+    if (predictions.length === 0) {
+      busy = false;
+      setTimeout(loop, 120);
+      return;
+    }
 
-        let [x, y, w, h] = p.bbox;
+    // 🔥 выбираем САМЫЙ БОЛЬШОЙ объект (лучшее выделение)
+    trackedObject = predictions.reduce((max, p) => {
+      let area = p.bbox[2] * p.bbox[3];
+      let maxArea = max ? max.bbox[2] * max.bbox[3] : 0;
+      return area > maxArea ? p : max;
+    }, null);
 
-        x /= 2; y /= 2; w /= 2; h /= 2;
+    if (trackedObject && trackedObject.score > 0.6) {
 
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, w, h);
+      let [x, y, w, h] = trackedObject.bbox;
 
-        ctx.fillStyle = "red";
-        ctx.fillText(p.class, x, y - 5);
+      x /= 2; y /= 2; w /= 2; h /= 2;
 
-        // 📏 raw distance
-        let rawDistance = 200 / w;
+      // 🔲 РАМКА
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x, y, w, h);
 
-        // 🔥 СГЛАЖИВАНИЕ (очень важно)
-        smoothDistance = smoothDistance * 0.8 + rawDistance * 0.2;
+      ctx.fillStyle = "red";
+      ctx.fillText(trackedObject.class, x, y - 5);
 
-        document.getElementById("distance").innerText =
-          p.class + " ≈ " + smoothDistance.toFixed(2) + " m";
+      // 📏 расстояние
+      let rawDistance = 200 / w;
 
-        handleAlerts(smoothDistance);
-      }
-    });
+      // 🔥 сглаживание
+      smoothDistance = smoothDistance * 0.85 + rawDistance * 0.15;
+
+      document.getElementById("distance").innerText =
+        trackedObject.class + " ≈ " + smoothDistance.toFixed(2) + " m";
+
+      handleAlerts(smoothDistance);
+    }
 
   } catch (e) {
     console.log(e);
@@ -117,33 +119,36 @@ async function loop() {
   setTimeout(loop, 120);
 }
 
-// 🚗 логика парктроника
+// 🚗 ЛОГИКА ПАРКТРОНИКА (УЛЬТРА НАДЁЖНАЯ)
 function handleAlerts(distance) {
+
+  // 🔥 100% вибрация если < 1 метра
   if (distance < 1) {
-    alertStrong();
+
+    if (vibrationOn) {
+      let now = Date.now();
+
+      // защита iPhone (но НЕ пропускает сигнал)
+      if (now - lastVibrateTime > 200) {
+        navigator.vibrate([200, 100, 200, 100, 200]);
+        lastVibrateTime = now;
+      }
+    }
+
+    if (soundOn) {
+      sound.currentTime = 0;
+      sound.play();
+    }
+
   } else if (distance < 2) {
-    alertMedium();
-  }
-}
 
-function alertStrong() {
-  if (soundOn) {
-    sound.currentTime = 0;
-    sound.play();
-  }
+    if (vibrationOn) {
+      navigator.vibrate(100);
+    }
 
-  if (vibrationOn && navigator.vibrate) {
-    navigator.vibrate([120, 50, 120]);
-  }
-}
-
-function alertMedium() {
-  if (soundOn) {
-    sound.currentTime = 0;
-    sound.play();
-  }
-
-  if (vibrationOn && navigator.vibrate) {
-    navigator.vibrate(100);
+    if (soundOn) {
+      sound.currentTime = 0;
+      sound.play();
+    }
   }
 }
