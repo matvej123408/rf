@@ -9,13 +9,15 @@ let vibrationOn = false;
 let running = false;
 
 let model;
-let lastTime = 0;
+let busy = false; // 🔥 защита от лагов
 
+// загрузка модели
 async function loadModel() {
   model = await cocoSsd.load();
   console.log("Model loaded");
 }
 
+// камера
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "environment" }
@@ -24,19 +26,21 @@ async function startCamera() {
   video.srcObject = stream;
 
   video.onloadedmetadata = () => {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // уменьшаем разрешение → быстрее
+    canvas.width = video.videoWidth / 2;
+    canvas.height = video.videoHeight / 2;
   };
 
   await loadModel();
 }
 
+// кнопки
 function toggleSound() { soundOn = !soundOn; }
 function toggleVibration() { vibrationOn = !vibrationOn; }
 
 function toggleMeasure() {
   running = !running;
-  if (running) detect();
+  if (running) loop();
 }
 
 function resetAll() {
@@ -44,42 +48,58 @@ function resetAll() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
 
-async function detect(time = 0) {
+// 🔥 главный цикл (НЕ requestAnimationFrame)
+async function loop() {
   if (!running) return;
 
-  if (time - lastTime < 70) {
-    requestAnimationFrame(detect);
+  // если модель занята → пропускаем кадр
+  if (busy) {
+    setTimeout(loop, 50);
     return;
   }
-  lastTime = time;
 
-  const predictions = await model.detect(video);
+  busy = true;
 
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  try {
+    const predictions = await model.detect(video);
 
-  predictions.forEach(p => {
-    if (p.score > 0.6) {
-      const [x, y, w, h] = p.bbox;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x, y, w, h);
+    predictions.forEach(p => {
+      if (p.score > 0.6) {
+        let [x, y, w, h] = p.bbox;
 
-      ctx.fillStyle = "red";
-      ctx.fillText(p.class, x, y - 5);
+        // масштаб под уменьшенный canvas
+        x /= 2; y /= 2; w /= 2; h /= 2;
 
-      let distance = (1 / w) * 100;
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
 
-      document.getElementById("distance").innerText =
-        p.class + " ≈ " + distance.toFixed(2) + " m";
+        ctx.fillStyle = "red";
+        ctx.fillText(p.class, x, y - 5);
 
-      alertUser();
-    }
-  });
+        // стабильнее расстояние
+        let distance = 200 / w;
 
-  requestAnimationFrame(detect);
+        document.getElementById("distance").innerText =
+          p.class + " ≈ " + distance.toFixed(2) + " m";
+
+        alertUser();
+      }
+    });
+
+  } catch (e) {
+    console.error(e);
+  }
+
+  busy = false;
+
+  // 🔥 задержка = стабильность
+  setTimeout(loop, 120);
 }
 
+// сигнал
 function alertUser() {
   if (soundOn) {
     sound.currentTime = 0;
@@ -87,6 +107,6 @@ function alertUser() {
   }
 
   if (vibrationOn && navigator.vibrate) {
-    navigator.vibrate(100);
+    navigator.vibrate(80);
   }
 }
