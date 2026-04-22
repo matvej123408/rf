@@ -1,0 +1,8 @@
+{
+  "name": "AR Distance PRO",
+  "short_name": "AR PRO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000",
+  "theme_color": "#000"
+}
