@@ -11,14 +11,17 @@ let running = false;
 let model;
 let busy = false;
 
-// 🔥 продвинутое сглаживание
+// 📏 расстояние
 let smoothDistance = 0;
+let lastDistance = 0;
+
+// ⚡ скорость
+let speed = 0;
+let smoothSpeed = 0;
+let lastTime = Date.now();
 
 // 🔊 Tesla звук
 let beepInterval = null;
-
-// 🎯 фикс объекта
-let trackedBox = null;
 
 // загрузка модели
 async function loadModel() {
@@ -53,7 +56,7 @@ function toggleMeasure() {
 function resetAll() {
   running = false;
   smoothDistance = 0;
-  trackedBox = null;
+  smoothSpeed = 0;
   stopBeep();
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
@@ -76,14 +79,11 @@ async function loop() {
 
     if (predictions.length > 0) {
 
-      // 🔥 лучший объект (по площади + близости к прошлому)
+      // берём самый большой объект
       let best = predictions.reduce((best, p) => {
         let area = p.bbox[2] * p.bbox[3];
-
         if (!best) return p;
-
         let bestArea = best.bbox[2] * best.bbox[3];
-
         return area > bestArea ? p : best;
       }, null);
 
@@ -93,9 +93,7 @@ async function loop() {
 
         x /= 2; y /= 2; w /= 2; h /= 2;
 
-        trackedBox = {x,y,w,h};
-
-        // 🎯 рамка
+        // рамка
         ctx.strokeStyle = "red";
         ctx.lineWidth = 4;
         ctx.strokeRect(x, y, w, h);
@@ -103,19 +101,35 @@ async function loop() {
         ctx.fillStyle = "red";
         ctx.fillText(best.class, x, y - 5);
 
-        // 📏 raw distance
-        let raw = 200 / w;
+        // 📏 расстояние
+        let rawDistance = 200 / w;
 
-        // 🔥 АДАПТИВНОЕ СГЛАЖИВАНИЕ
-        let diff = Math.abs(raw - smoothDistance);
+        // сглаживание
+        let diff = Math.abs(rawDistance - smoothDistance);
+        let alpha = diff > 1 ? 0.1 : 0.25;
+        smoothDistance = smoothDistance * (1 - alpha) + rawDistance * alpha;
 
-        let alpha = diff > 1 ? 0.1 : 0.25; 
-        smoothDistance = smoothDistance * (1 - alpha) + raw * alpha;
+        // ⚡ скорость (Δdistance / Δtime)
+        let now = Date.now();
+        let dt = (now - lastTime) / 1000; // секунды
 
+        if (dt > 0) {
+          speed = (lastDistance - smoothDistance) / dt; // + = приближается
+        }
+
+        // сглаживание скорости
+        smoothSpeed = smoothSpeed * 0.7 + speed * 0.3;
+
+        lastDistance = smoothDistance;
+        lastTime = now;
+
+        // вывод
         document.getElementById("distance").innerText =
-          best.class + " ≈ " + smoothDistance.toFixed(2) + " m";
+          best.class +
+          " | " + smoothDistance.toFixed(2) + " m" +
+          " | v=" + smoothSpeed.toFixed(2) + " m/s";
 
-        handleAlerts(smoothDistance);
+        handleAlerts(smoothDistance, smoothSpeed);
       }
     }
 
@@ -128,25 +142,29 @@ async function loop() {
 }
 
 //////////////////////////////////////////////////
-// 🔊 TESLA SOUND
+// 🔊 TESLA SOUND + скорость
 //////////////////////////////////////////////////
 
-function handleAlerts(distance) {
+function handleAlerts(distance, speed) {
 
   if (distance > 2) {
     stopBeep();
     return;
   }
 
+  // 🔥 чем быстрее приближается → быстрее звук
   let interval;
 
-  if (distance < 0.5) interval = 90;
-  else if (distance < 1) interval = 160;
-  else interval = 350;
+  if (distance < 0.5) interval = 80;
+  else if (distance < 1) interval = 140;
+  else interval = 300;
+
+  // ускорение если объект движется к тебе
+  if (speed > 0.5) interval *= 0.7;
 
   startBeep(interval);
 
-  // 📳 вибрация
+  // вибрация
   if (distance < 1 && vibrationOn) {
     navigator.vibrate([150, 50, 150]);
   } else if (distance < 2 && vibrationOn) {
