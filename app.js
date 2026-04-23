@@ -11,13 +11,14 @@ let running = false;
 let model;
 let busy = false;
 
+// 🔥 продвинутое сглаживание
 let smoothDistance = 0;
 
-// 📌 анти-дребезг вибрации
-let lastVibrateTime = 0;
+// 🔊 Tesla звук
+let beepInterval = null;
 
-// 📌 выбранный объект (самый большой)
-let trackedObject = null;
+// 🎯 фикс объекта
+let trackedBox = null;
 
 // загрузка модели
 async function loadModel() {
@@ -52,7 +53,8 @@ function toggleMeasure() {
 function resetAll() {
   running = false;
   smoothDistance = 0;
-  trackedObject = null;
+  trackedBox = null;
+  stopBeep();
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
 
@@ -72,43 +74,49 @@ async function loop() {
 
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    if (predictions.length === 0) {
-      busy = false;
-      setTimeout(loop, 120);
-      return;
-    }
+    if (predictions.length > 0) {
 
-    // 🔥 выбираем САМЫЙ БОЛЬШОЙ объект (лучшее выделение)
-    trackedObject = predictions.reduce((max, p) => {
-      let area = p.bbox[2] * p.bbox[3];
-      let maxArea = max ? max.bbox[2] * max.bbox[3] : 0;
-      return area > maxArea ? p : max;
-    }, null);
+      // 🔥 лучший объект (по площади + близости к прошлому)
+      let best = predictions.reduce((best, p) => {
+        let area = p.bbox[2] * p.bbox[3];
 
-    if (trackedObject && trackedObject.score > 0.6) {
+        if (!best) return p;
 
-      let [x, y, w, h] = trackedObject.bbox;
+        let bestArea = best.bbox[2] * best.bbox[3];
 
-      x /= 2; y /= 2; w /= 2; h /= 2;
+        return area > bestArea ? p : best;
+      }, null);
 
-      // 🔲 РАМКА
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 4;
-      ctx.strokeRect(x, y, w, h);
+      if (best.score > 0.6) {
 
-      ctx.fillStyle = "red";
-      ctx.fillText(trackedObject.class, x, y - 5);
+        let [x, y, w, h] = best.bbox;
 
-      // 📏 расстояние
-      let rawDistance = 200 / w;
+        x /= 2; y /= 2; w /= 2; h /= 2;
 
-      // 🔥 сглаживание
-      smoothDistance = smoothDistance * 0.85 + rawDistance * 0.15;
+        trackedBox = {x,y,w,h};
 
-      document.getElementById("distance").innerText =
-        trackedObject.class + " ≈ " + smoothDistance.toFixed(2) + " m";
+        // 🎯 рамка
+        ctx.strokeStyle = "red";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(x, y, w, h);
 
-      handleAlerts(smoothDistance);
+        ctx.fillStyle = "red";
+        ctx.fillText(best.class, x, y - 5);
+
+        // 📏 raw distance
+        let raw = 200 / w;
+
+        // 🔥 АДАПТИВНОЕ СГЛАЖИВАНИЕ
+        let diff = Math.abs(raw - smoothDistance);
+
+        let alpha = diff > 1 ? 0.1 : 0.25; 
+        smoothDistance = smoothDistance * (1 - alpha) + raw * alpha;
+
+        document.getElementById("distance").innerText =
+          best.class + " ≈ " + smoothDistance.toFixed(2) + " m";
+
+        handleAlerts(smoothDistance);
+      }
     }
 
   } catch (e) {
@@ -119,36 +127,51 @@ async function loop() {
   setTimeout(loop, 120);
 }
 
-// 🚗 ЛОГИКА ПАРКТРОНИКА (УЛЬТРА НАДЁЖНАЯ)
+//////////////////////////////////////////////////
+// 🔊 TESLA SOUND
+//////////////////////////////////////////////////
+
 function handleAlerts(distance) {
 
-  // 🔥 100% вибрация если < 1 метра
-  if (distance < 1) {
+  if (distance > 2) {
+    stopBeep();
+    return;
+  }
 
-    if (vibrationOn) {
-      let now = Date.now();
+  let interval;
 
-      // защита iPhone (но НЕ пропускает сигнал)
-      if (now - lastVibrateTime > 200) {
-        navigator.vibrate([200, 100, 200, 100, 200]);
-        lastVibrateTime = now;
-      }
-    }
+  if (distance < 0.5) interval = 90;
+  else if (distance < 1) interval = 160;
+  else interval = 350;
 
-    if (soundOn) {
-      sound.currentTime = 0;
-      sound.play();
-    }
+  startBeep(interval);
 
-  } else if (distance < 2) {
+  // 📳 вибрация
+  if (distance < 1 && vibrationOn) {
+    navigator.vibrate([150, 50, 150]);
+  } else if (distance < 2 && vibrationOn) {
+    navigator.vibrate(100);
+  }
+}
 
-    if (vibrationOn) {
-      navigator.vibrate(100);
-    }
+function startBeep(interval) {
+  if (!soundOn) return;
 
-    if (soundOn) {
-      sound.currentTime = 0;
-      sound.play();
-    }
+  if (beepInterval && beepInterval._interval === interval) return;
+
+  stopBeep();
+
+  beepInterval = setInterval(() => {
+    sound.currentTime = 0;
+    sound.play();
+  }, interval);
+
+  beepInterval._interval = interval;
+}
+
+function stopBeep() {
+  if (beepInterval) {
+    clearInterval(beepInterval);
+    beepInterval = null;
   }
 }
