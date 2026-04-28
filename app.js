@@ -19,30 +19,34 @@ let camOffsetY = 0;
 let lostFrames = 0;
 const MAX_LOST = 15;
 
-let isLocked = false;
-
-// 🎥 RECORD
-let mediaRecorder;
-let recordedChunks = [];
-let recording = false;
-
-let frameReady = false;
 let busy = false;
 
 // =====================
-// 🔥 НАСТОЯЩИЙ FIX КНОПОК
-// =====================
+// 🚀 КНОПКА СТАРТА (FIX)
 document.getElementById("startBtn").addEventListener("click", async () => {
 
-  document.getElementById("status").innerText = "Запуск...";
+  try {
+    document.getElementById("status").innerText = "📷 Запуск камеры...";
 
-  await startCamera();
-  await loadModel();
+    await startCamera();
 
-  running = true;
-  loop();
+    document.getElementById("status").innerText = "🧠 Загрузка AI...";
+
+    await loadModel();
+
+    document.getElementById("status").innerText = "🚀 Старт";
+
+    running = true;
+    loop();
+
+  } catch(e) {
+    document.getElementById("status").innerText = "❌ Ошибка: " + e.message;
+    console.log(e);
+  }
+
 });
 
+// =====================
 document.getElementById("camBtn").addEventListener("click", async () => {
   isFront = !isFront;
   await startCamera();
@@ -50,13 +54,14 @@ document.getElementById("camBtn").addEventListener("click", async () => {
 
 // =====================
 async function loadModel() {
+
   if (model) return;
+
   model = await cocoSsd.load();
 }
 
 // =====================
-// 📷 КАМЕРА (УЛЬТРА ФИКС)
-// =====================
+// 📷 КАМЕРА (ЖЁСТКИЙ FIX)
 async function startCamera() {
 
   if (stream) stream.getTracks().forEach(t => t.stop());
@@ -71,21 +76,25 @@ async function startCamera() {
 
   await video.play();
 
-  await new Promise(r => {
-    video.onloadedmetadata = () => r();
-  });
+  // 🔥 FIX зависания
+  await new Promise(resolve => setTimeout(resolve, 300));
 
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
 }
 
 // =====================
 // 🎯 TARGET
 function pickTarget(predictions) {
+
+  if (!predictions.length) return null;
+
   let people = predictions.filter(p => p.class === "person");
+
   return people.length ? people[0] : predictions[0];
 }
 
+// =====================
 function matchTarget(predictions) {
 
   if (!target) return null;
@@ -97,7 +106,9 @@ function matchTarget(predictions) {
   let ty = focus.y + focus.h/2;
 
   predictions.forEach(p => {
+
     let [x,y,w,h] = p.bbox;
+
     let px = x + w/2;
     let py = y + h/2;
 
@@ -115,8 +126,10 @@ function matchTarget(predictions) {
 }
 
 // =====================
+// 🎯 SMOOTH (как раньше)
 function smooth(box) {
-  let a = 0.15;
+
+  let a = 0.2;
 
   focus.x += (box.x - focus.x) * a;
   focus.y += (box.y - focus.y) * a;
@@ -127,6 +140,7 @@ function smooth(box) {
 }
 
 // =====================
+// 🔭 НОРМАЛЬНЫЙ ZOOM (как раньше)
 function updateZoom(box) {
 
   let size = box.w * box.h;
@@ -134,32 +148,27 @@ function updateZoom(box) {
 
   let ratio = size / screen;
 
-  if (ratio < 0.02) targetZoom = 5;
-  else if (ratio < 0.05) targetZoom = 4;
-  else targetZoom = 2;
-
-  if (isLocked) targetZoom += 1;
-
-  if (targetZoom > 6) targetZoom = 6;
+  if (ratio < 0.05) targetZoom = 2.2;
+  else if (ratio < 0.15) targetZoom = 1.6;
+  else targetZoom = 1.1;
 
   zoom += (targetZoom - zoom) * 0.08;
 }
 
 // =====================
+// 🚁 ДРОН РЕЖИМ (СТАБИЛЬНЫЙ)
 function updateCameraOffset(box) {
 
-  let cx = canvas.width/2;
-  let cy = canvas.height/2;
+  let cx = canvas.width / 2;
+  let cy = canvas.height / 2;
 
   let ox = box.x + box.w/2;
   let oy = box.y + box.h/2;
 
-  camOffsetX += (ox - cx) * 0.05;
-  camOffsetY += (oy - cy) * 0.05;
+  camOffsetX += (ox - cx) * 0.04;
+  camOffsetY += (oy - cy) * 0.04;
 }
 
-// =====================
-// 🎥 DRAW (фикс чёрного видео)
 // =====================
 function drawZoomedVideo() {
 
@@ -175,53 +184,6 @@ function drawZoomedVideo() {
   let zy = (vh - zh)/2 + camOffsetY;
 
   ctx.drawImage(video, zx, zy, zw, zh, 0, 0, canvas.width, canvas.height);
-
-  frameReady = true;
-}
-
-// =====================
-// 🎥 RECORD FIX
-// =====================
-function startRecording() {
-
-  if (recording || !frameReady) return;
-
-  let stream = canvas.captureStream(30);
-
-  mediaRecorder = new MediaRecorder(stream);
-
-  recordedChunks = [];
-
-  mediaRecorder.ondataavailable = e => {
-    if (e.data.size > 0) recordedChunks.push(e.data);
-  };
-
-  mediaRecorder.onstop = saveVideo;
-
-  setTimeout(() => {
-    mediaRecorder.start();
-    recording = true;
-  }, 200);
-}
-
-function stopRecording() {
-
-  if (!recording) return;
-
-  mediaRecorder.stop();
-  recording = false;
-}
-
-function saveVideo() {
-
-  let blob = new Blob(recordedChunks);
-
-  let url = URL.createObjectURL(blob);
-
-  let a = document.createElement("a");
-  a.href = url;
-  a.download = "tracking.webm";
-  a.click();
 }
 
 // =====================
@@ -237,7 +199,6 @@ async function loop() {
     const predictions = await model.detect(video);
 
     ctx.clearRect(0,0,canvas.width,canvas.height);
-
     drawZoomedVideo();
 
     let newTarget = target ? matchTarget(predictions) : null;
@@ -254,9 +215,6 @@ async function loop() {
 
     if (target) {
 
-      isLocked = true;
-      startRecording();
-
       let [x,y,w,h] = target.bbox;
 
       let f = smooth({x,y,w,h});
@@ -269,9 +227,7 @@ async function loop() {
       ctx.strokeRect(f.x,f.y,f.w,f.h);
 
     } else {
-
-      isLocked = false;
-      stopRecording();
+      document.getElementById("status").innerText = "Поиск...";
     }
 
   } catch(e) {
