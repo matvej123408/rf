@@ -11,19 +11,16 @@ let running = false;
 let model;
 let busy = false;
 
-// 🔊 звук
 let beepInterval = null;
 
-// 📦 треки
+// трекинг
 let tracks = {};
 let nextId = 1;
 
-// 🧾 история
+// история
 let historyLog = [];
 
-// =====================
-// INIT
-// =====================
+// ===================== INIT =====================
 async function loadModel() {
   model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
 }
@@ -43,9 +40,7 @@ async function startCamera() {
   if (!model) await loadModel();
 }
 
-// =====================
-// КНОПКИ
-// =====================
+// ===================== КНОПКИ =====================
 function toggleSound() { soundOn = !soundOn; }
 function toggleVibration() { vibrationOn = !vibrationOn; }
 
@@ -63,9 +58,7 @@ function resetAll() {
   updateHistory();
 }
 
-// =====================
-// ГЛАВНЫЙ ЦИКЛ
-// =====================
+// ===================== LOOP =====================
 async function loop() {
   if (!running) return;
 
@@ -82,9 +75,22 @@ async function loop() {
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
     let detections = predictions
-      .filter(p => p.score > 0.6)
+      .filter(p => {
+        if (p.score > 0.6) return true;
+
+        // птицы чувствительнее
+        if (p.class === "bird" && p.score > 0.3) return true;
+
+        // маленькие объекты → bird?
+        if (p.score > 0.4 && p.bbox[2] < 80 && p.bbox[3] < 80) {
+          p.class = "bird?";
+          return true;
+        }
+
+        return false;
+      })
       .sort((a,b)=> (b.bbox[2]*b.bbox[3])-(a.bbox[2]*a.bbox[3]))
-      .slice(0,5); // максимум 5 объектов
+      .slice(0,5);
 
     let used = new Set();
 
@@ -149,13 +155,21 @@ async function loop() {
       let w = t.w/2;
       let h = t.h/2;
 
-      ctx.strokeStyle = "red";
+      // 🐦 цвет
+      if (t.class === "bird" || t.class === "bird?") {
+        ctx.strokeStyle = "cyan";
+      } else {
+        ctx.strokeStyle = "red";
+      }
+
       ctx.lineWidth = 3;
       ctx.strokeRect(x,y,w,h);
 
+      let label = t.class === "bird?" ? "bird (far)" : t.class;
+
       ctx.fillStyle = "white";
       ctx.fillText(
-        "#" + id + " " + t.class +
+        "#" + id + " " + label +
         " " + t.dist.toFixed(1) + "m" +
         " " + t.kmh.toFixed(1) + "km/h",
         x, y - 5
@@ -176,9 +190,7 @@ async function loop() {
   setTimeout(loop, 120);
 }
 
-// =====================
-// TRACK
-// =====================
+// ===================== TRACK =====================
 function createTrack(id, p) {
   let [x,y,w,h] = p.bbox;
 
@@ -213,7 +225,6 @@ function updateTrack(t, p, cx, cy) {
   t.cy = cy;
 
   let raw = 200 / (t.w/2);
-
   t.dist = t.dist*0.8 + raw*0.2;
 
   let now = Date.now();
@@ -229,9 +240,7 @@ function updateTrack(t, p, cx, cy) {
   t.missed = 0;
 }
 
-// =====================
-// ЗВУК
-// =====================
+// ===================== ЗВУК =====================
 function handleAlerts(distance) {
   if (distance > 2) {
     stopBeep();
@@ -275,9 +284,7 @@ function stopBeep() {
   }
 }
 
-// =====================
-// ИСТОРИЯ
-// =====================
+// ===================== ИСТОРИЯ =====================
 function addHistory(text) {
   let t = new Date().toLocaleTimeString();
   historyLog.unshift(t + " " + text);
