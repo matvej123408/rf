@@ -1,36 +1,62 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="manifest" href="manifest.json">
+
+<title>AI Tracking</title>
+
 <style>
-body { margin:0; background:black; color:white; text-align:center; }
-video { width:100%; }
-#overlay {
+body {
+  margin:0;
+  background:black;
+  color:white;
+  text-align:center;
+  font-family:sans-serif;
+}
+
+video, canvas {
+  width:100%;
+  max-width:500px;
+}
+
+.container {
+  position:relative;
+  display:inline-block;
+}
+
+canvas {
   position:absolute;
   top:0;
   left:0;
+}
+
+button {
+  margin:5px;
+  padding:12px;
+  border:none;
+  border-radius:10px;
+  background:#1e293b;
+  color:white;
 }
 </style>
 </head>
 
 <body>
 
-<video id="video" autoplay playsinline></video>
-<canvas id="overlay"></canvas>
-<div id="history" style="font-size:12px; max-height:150px; overflow:auto;"></div>
+<h3>🎯 Tracking System</h3>
 
-<div>
-  <button onclick="startCamera()">1 Камера</button>
-  <button onclick="toggleSound()">2 Звук</button>
-  <button onclick="toggleVibration()">3 Вибрация</button>
-  <button onclick="toggleMeasure()">4 Старт</button>
-  <button onclick="resetAll()">5 Сброс</button>
-  <div id="history" style="font-size:12px; max-height:150px; overflow:auto;"></div>
-<button onclick="toggleZoom()">Zoom объект</button>
+<div class="container">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
 </div>
 
-<p id="distance">Distance: -</p>
+<br>
+
+<button id="startBtn">🚀 Запустить</button>
+<button id="camBtn">🔄 Камера</button>
+
+<p id="status">Нажми Запустить</p>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
