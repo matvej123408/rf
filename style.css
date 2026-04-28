@@ -1,0 +1,36 @@
+body {
+  background:#0f172a;
+  color:white;
+  text-align:center;
+  font-family:sans-serif;
+}
+
+.container {
+  position: relative;
+  display:inline-block;
+}
+
+video, canvas {
+  width:95%;
+  max-width:500px;
+  border-radius:15px;
+}
+
+canvas {
+  position:absolute;
+  top:0;
+  left:0;
+}
+
+.controls {
+  margin-top:10px;
+}
+
+button {
+  margin:5px;
+  padding:10px;
+  border:none;
+  border-radius:10px;
+  background:#1e293b;
+  color:white;
+}
