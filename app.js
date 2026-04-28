@@ -2,184 +2,276 @@ let video = document.getElementById("video");
 let canvas = document.getElementById("overlay");
 let ctx = canvas.getContext("2d");
 
-let sound = new Audio("sound.mp3");
-
-let soundOn = false;
-let vibrationOn = false;
-let running = false;
-
 let model;
+let stream;
+let running = false;
+let isFront = false;
+
+let target = null;
+let focus = {x:0,y:0,w:0,h:0};
+
+let zoom = 1;
+let targetZoom = 1;
+
+let camOffsetX = 0;
+let camOffsetY = 0;
+
+let lostFrames = 0;
+const MAX_LOST = 15;
+
+let isLocked = false;
+
+// 🎥 RECORD
+let mediaRecorder;
+let recordedChunks = [];
+let recording = false;
+
+let frameReady = false;
 let busy = false;
 
-let beepInterval = null;
+// =====================
+// 🔥 НАСТОЯЩИЙ FIX КНОПОК
+// =====================
+document.getElementById("startBtn").addEventListener("click", async () => {
 
-// трекинг
-let tracks = {};
-let nextId = 1;
+  document.getElementById("status").innerText = "Запуск...";
 
-// история
-let historyLog = [];
+  await startCamera();
+  await loadModel();
 
-// ===================== INIT =====================
+  running = true;
+  loop();
+});
+
+document.getElementById("camBtn").addEventListener("click", async () => {
+  isFront = !isFront;
+  await startCamera();
+});
+
+// =====================
 async function loadModel() {
-  model = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+  if (model) return;
+  model = await cocoSsd.load();
 }
 
+// =====================
+// 📷 КАМЕРА (УЛЬТРА ФИКС)
+// =====================
 async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment" }
+
+  if (stream) stream.getTracks().forEach(t => t.stop());
+
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: isFront ? "user" : "environment"
+    }
   });
 
   video.srcObject = stream;
 
-  video.onloadedmetadata = () => {
-    canvas.width = video.videoWidth / 2;
-    canvas.height = video.videoHeight / 2;
+  await video.play();
+
+  await new Promise(r => {
+    video.onloadedmetadata = () => r();
+  });
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+}
+
+// =====================
+// 🎯 TARGET
+function pickTarget(predictions) {
+  let people = predictions.filter(p => p.class === "person");
+  return people.length ? people[0] : predictions[0];
+}
+
+function matchTarget(predictions) {
+
+  if (!target) return null;
+
+  let best = null;
+  let bestDist = Infinity;
+
+  let tx = focus.x + focus.w/2;
+  let ty = focus.y + focus.h/2;
+
+  predictions.forEach(p => {
+    let [x,y,w,h] = p.bbox;
+    let px = x + w/2;
+    let py = y + h/2;
+
+    let dist = Math.hypot(px - tx, py - ty);
+
+    if (dist < bestDist) {
+      best = p;
+      bestDist = dist;
+    }
+  });
+
+  if (bestDist > 150) return null;
+
+  return best;
+}
+
+// =====================
+function smooth(box) {
+  let a = 0.15;
+
+  focus.x += (box.x - focus.x) * a;
+  focus.y += (box.y - focus.y) * a;
+  focus.w += (box.w - focus.w) * a;
+  focus.h += (box.h - focus.h) * a;
+
+  return focus;
+}
+
+// =====================
+function updateZoom(box) {
+
+  let size = box.w * box.h;
+  let screen = canvas.width * canvas.height;
+
+  let ratio = size / screen;
+
+  if (ratio < 0.02) targetZoom = 5;
+  else if (ratio < 0.05) targetZoom = 4;
+  else targetZoom = 2;
+
+  if (isLocked) targetZoom += 1;
+
+  if (targetZoom > 6) targetZoom = 6;
+
+  zoom += (targetZoom - zoom) * 0.08;
+}
+
+// =====================
+function updateCameraOffset(box) {
+
+  let cx = canvas.width/2;
+  let cy = canvas.height/2;
+
+  let ox = box.x + box.w/2;
+  let oy = box.y + box.h/2;
+
+  camOffsetX += (ox - cx) * 0.05;
+  camOffsetY += (oy - cy) * 0.05;
+}
+
+// =====================
+// 🎥 DRAW (фикс чёрного видео)
+// =====================
+function drawZoomedVideo() {
+
+  if (!video.videoWidth) return;
+
+  let vw = video.videoWidth;
+  let vh = video.videoHeight;
+
+  let zw = vw / zoom;
+  let zh = vh / zoom;
+
+  let zx = (vw - zw)/2 + camOffsetX;
+  let zy = (vh - zh)/2 + camOffsetY;
+
+  ctx.drawImage(video, zx, zy, zw, zh, 0, 0, canvas.width, canvas.height);
+
+  frameReady = true;
+}
+
+// =====================
+// 🎥 RECORD FIX
+// =====================
+function startRecording() {
+
+  if (recording || !frameReady) return;
+
+  let stream = canvas.captureStream(30);
+
+  mediaRecorder = new MediaRecorder(stream);
+
+  recordedChunks = [];
+
+  mediaRecorder.ondataavailable = e => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
   };
 
-  if (!model) await loadModel();
+  mediaRecorder.onstop = saveVideo;
+
+  setTimeout(() => {
+    mediaRecorder.start();
+    recording = true;
+  }, 200);
 }
 
-// ===================== КНОПКИ =====================
-function toggleSound() { soundOn = !soundOn; }
-function toggleVibration() { vibrationOn = !vibrationOn; }
+function stopRecording() {
 
-function toggleMeasure() {
-  running = !running;
-  if (running) loop();
+  if (!recording) return;
+
+  mediaRecorder.stop();
+  recording = false;
 }
 
-function resetAll() {
-  running = false;
-  tracks = {};
-  historyLog = [];
-  stopBeep();
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  updateHistory();
+function saveVideo() {
+
+  let blob = new Blob(recordedChunks);
+
+  let url = URL.createObjectURL(blob);
+
+  let a = document.createElement("a");
+  a.href = url;
+  a.download = "tracking.webm";
+  a.click();
 }
 
-// ===================== LOOP =====================
+// =====================
 async function loop() {
-  if (!running) return;
 
-  if (busy) {
-    setTimeout(loop, 50);
-    return;
-  }
+  if (!running) return;
+  if (busy) return requestAnimationFrame(loop);
 
   busy = true;
 
   try {
+
     const predictions = await model.detect(video);
 
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    let detections = predictions
-      .filter(p => {
-        if (p.score > 0.6) return true;
+    drawZoomedVideo();
 
-        // птицы чувствительнее
-        if (p.class === "bird" && p.score > 0.3) return true;
+    let newTarget = target ? matchTarget(predictions) : null;
 
-        // маленькие объекты → bird?
-        if (p.score > 0.4 && p.bbox[2] < 80 && p.bbox[3] < 80) {
-          p.class = "bird?";
-          return true;
-        }
+    if (!newTarget) lostFrames++;
+    else lostFrames = 0;
 
-        return false;
-      })
-      .sort((a,b)=> (b.bbox[2]*b.bbox[3])-(a.bbox[2]*a.bbox[3]))
-      .slice(0,5);
-
-    let used = new Set();
-
-    // ===== сопоставление =====
-    for (let id in tracks) {
-      let t = tracks[id];
-
-      let best = null;
-      let bestDist = 9999;
-
-      detections.forEach((p,i)=>{
-        if (used.has(i)) return;
-
-        let cx = p.bbox[0] + p.bbox[2]/2;
-        let cy = p.bbox[1] + p.bbox[3]/2;
-
-        let dx = t.cx - cx;
-        let dy = t.cy - cy;
-        let dist = Math.sqrt(dx*dx+dy*dy);
-
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = {p,i,cx,cy};
-        }
-      });
-
-      if (best && bestDist < 150) {
-        used.add(best.i);
-        updateTrack(t, best.p, best.cx, best.cy);
-      } else {
-        t.missed++;
-      }
+    if (!target || lostFrames > MAX_LOST) {
+      target = pickTarget(predictions);
+      lostFrames = 0;
+    } else if (newTarget) {
+      target = newTarget;
     }
 
-    // ===== новые =====
-    detections.forEach((p,i)=>{
-      if (used.has(i)) return;
+    if (target) {
 
-      let id = nextId++;
+      isLocked = true;
+      startRecording();
 
-      tracks[id] = createTrack(id, p);
+      let [x,y,w,h] = target.bbox;
 
-      addHistory("NEW #" + id + " " + p.class);
-    });
+      let f = smooth({x,y,w,h});
 
-    // ===== удаление =====
-    for (let id in tracks) {
-      if (tracks[id].missed > 5) {
-        addHistory("LOST #" + id);
-        delete tracks[id];
-      }
-    }
+      updateZoom(f);
+      updateCameraOffset(f);
 
-    let closest = Infinity;
+      ctx.strokeStyle = "red";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(f.x,f.y,f.w,f.h);
 
-    // ===== отрисовка =====
-    for (let id in tracks) {
-      let t = tracks[id];
+    } else {
 
-      let x = t.x/2;
-      let y = t.y/2;
-      let w = t.w/2;
-      let h = t.h/2;
-
-      // 🐦 цвет
-      if (t.class === "bird" || t.class === "bird?") {
-        ctx.strokeStyle = "cyan";
-      } else {
-        ctx.strokeStyle = "red";
-      }
-
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x,y,w,h);
-
-      let label = t.class === "bird?" ? "bird (far)" : t.class;
-
-      ctx.fillStyle = "white";
-      ctx.fillText(
-        "#" + id + " " + label +
-        " " + t.dist.toFixed(1) + "m" +
-        " " + t.kmh.toFixed(1) + "km/h",
-        x, y - 5
-      );
-
-      if (t.dist < closest) closest = t.dist;
-    }
-
-    if (closest !== Infinity) {
-      handleAlerts(closest);
+      isLocked = false;
+      stopRecording();
     }
 
   } catch(e) {
@@ -187,113 +279,5 @@ async function loop() {
   }
 
   busy = false;
-  setTimeout(loop, 120);
-}
-
-// ===================== TRACK =====================
-function createTrack(id, p) {
-  let [x,y,w,h] = p.bbox;
-
-  let cx = x + w/2;
-  let cy = y + h/2;
-
-  let dist = 200 / (w/2);
-
-  return {
-    id,
-    class: p.class,
-    x,y,w,h,
-    cx,cy,
-    dist,
-    lastDist: dist,
-    speed: 0,
-    kmh: 0,
-    lastTime: Date.now(),
-    missed: 0
-  };
-}
-
-function updateTrack(t, p, cx, cy) {
-  let [x,y,w,h] = p.bbox;
-
-  t.x = t.x*0.7 + x*0.3;
-  t.y = t.y*0.7 + y*0.3;
-  t.w = t.w*0.7 + w*0.3;
-  t.h = t.h*0.7 + h*0.3;
-
-  t.cx = cx;
-  t.cy = cy;
-
-  let raw = 200 / (t.w/2);
-  t.dist = t.dist*0.8 + raw*0.2;
-
-  let now = Date.now();
-  let dt = (now - t.lastTime)/1000;
-
-  if (dt > 0) {
-    t.speed = (t.lastDist - t.dist)/dt;
-    t.kmh = t.speed * 3.6;
-  }
-
-  t.lastDist = t.dist;
-  t.lastTime = now;
-  t.missed = 0;
-}
-
-// ===================== ЗВУК =====================
-function handleAlerts(distance) {
-  if (distance > 2) {
-    stopBeep();
-    return;
-  }
-
-  let interval;
-
-  if (distance < 0.5) interval = 80;
-  else if (distance < 1) interval = 140;
-  else interval = 300;
-
-  startBeep(interval);
-
-  if (distance < 1 && vibrationOn) {
-    navigator.vibrate([150,50,150]);
-  } else if (distance < 2 && vibrationOn) {
-    navigator.vibrate(100);
-  }
-}
-
-function startBeep(interval) {
-  if (!soundOn) return;
-
-  if (beepInterval && beepInterval._interval === interval) return;
-
-  stopBeep();
-
-  beepInterval = setInterval(()=>{
-    sound.currentTime = 0;
-    sound.play();
-  }, interval);
-
-  beepInterval._interval = interval;
-}
-
-function stopBeep() {
-  if (beepInterval) {
-    clearInterval(beepInterval);
-    beepInterval = null;
-  }
-}
-
-// ===================== ИСТОРИЯ =====================
-function addHistory(text) {
-  let t = new Date().toLocaleTimeString();
-  historyLog.unshift(t + " " + text);
-  if (historyLog.length > 30) historyLog.pop();
-  updateHistory();
-}
-
-function updateHistory() {
-  let el = document.getElementById("history");
-  if (!el) return;
-  el.innerHTML = historyLog.join("<br>");
+  requestAnimationFrame(loop);
 }
