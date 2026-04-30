@@ -8,42 +8,29 @@ let running = false;
 let isFront = false;
 
 let target = null;
-let focus = {x:0,y:0,w:0,h:0};
-
-let zoom = 1;
-let targetZoom = 1;
-
-let camOffsetX = 0;
-let camOffsetY = 0;
-
-let lostFrames = 0;
-const MAX_LOST = 15;
+let smoothBox = null;
 
 let busy = false;
 
+let detectFrames = 0;
+let lastSound = 0;
+
 // =====================
-// 🚀 КНОПКА СТАРТА (FIX)
 document.getElementById("startBtn").addEventListener("click", async () => {
-
   try {
-    document.getElementById("status").innerText = "📷 Запуск камеры...";
-
+    document.getElementById("status").innerText = "📷 Камера...";
     await startCamera();
 
-    document.getElementById("status").innerText = "🧠 Загрузка AI...";
-
+    document.getElementById("status").innerText = "🧠 AI...";
     await loadModel();
 
-    document.getElementById("status").innerText = "🚀 Старт";
-
+    document.getElementById("status").innerText = "🚀 Работаю";
     running = true;
     loop();
 
-  } catch(e) {
-    document.getElementById("status").innerText = "❌ Ошибка: " + e.message;
-    console.log(e);
+  } catch (e) {
+    document.getElementById("status").innerText = "❌ " + e.message;
   }
-
 });
 
 // =====================
@@ -54,136 +41,83 @@ document.getElementById("camBtn").addEventListener("click", async () => {
 
 // =====================
 async function loadModel() {
-
-  if (model) return;
-
-  model = await cocoSsd.load();
+  if (!model) model = await cocoSsd.load();
 }
 
 // =====================
-// 📷 КАМЕРА (ЖЁСТКИЙ FIX)
 async function startCamera() {
 
   if (stream) stream.getTracks().forEach(t => t.stop());
 
   stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: isFront ? "user" : "environment"
-    }
+    video: { facingMode: isFront ? "user" : "environment" }
   });
 
   video.srcObject = stream;
-
   await video.play();
 
-  // 🔥 FIX зависания
-  await new Promise(resolve => setTimeout(resolve, 300));
+  await new Promise(r => setTimeout(r, 300));
 
   canvas.width = video.videoWidth || 640;
   canvas.height = video.videoHeight || 480;
 }
 
 // =====================
-// 🎯 TARGET
+// 🎯 объекты
 function pickTarget(predictions) {
-
   if (!predictions.length) return null;
 
-  let people = predictions.filter(p => p.class === "person");
+  const priority = ["person", "dog", "cat", "bird", "car"];
 
-  return people.length ? people[0] : predictions[0];
+  for (let type of priority) {
+    let found = predictions.find(p => p.class === type);
+    if (found) return found;
+  }
+
+  return null;
 }
 
 // =====================
-function matchTarget(predictions) {
+// 📸 фото
+function takePhoto() {
+  let photo = document.createElement("canvas");
+  let pctx = photo.getContext("2d");
 
-  if (!target) return null;
+  photo.width = canvas.width;
+  photo.height = canvas.height;
 
-  let best = null;
-  let bestDist = Infinity;
+  pctx.drawImage(video, 0, 0, photo.width, photo.height);
 
-  let tx = focus.x + focus.w/2;
-  let ty = focus.y + focus.h/2;
-
-  predictions.forEach(p => {
-
-    let [x,y,w,h] = p.bbox;
-
-    let px = x + w/2;
-    let py = y + h/2;
-
-    let dist = Math.hypot(px - tx, py - ty);
-
-    if (dist < bestDist) {
-      best = p;
-      bestDist = dist;
-    }
-  });
-
-  if (bestDist > 150) return null;
-
-  return best;
+  let link = document.createElement("a");
+  link.download = "object.png";
+  link.href = photo.toDataURL("image/png");
+  link.click();
 }
 
 // =====================
-// 🎯 SMOOTH (как раньше)
-function smooth(box) {
-
-  let a = 0.2;
-
-  focus.x += (box.x - focus.x) * a;
-  focus.y += (box.y - focus.y) * a;
-  focus.w += (box.w - focus.w) * a;
-  focus.h += (box.h - focus.h) * a;
-
-  return focus;
+// 🔊 звук
+function playSound() {
+  let audio = new Audio("sound.mp3");
+  audio.play();
 }
 
 // =====================
-// 🔭 НОРМАЛЬНЫЙ ZOOM (как раньше)
-function updateZoom(box) {
+// 🎯 СИЛЬНОЕ СГЛАЖИВАНИЕ (точная рамка без дергания)
+function smoothBoxUpdate(box) {
 
-  let size = box.w * box.h;
-  let screen = canvas.width * canvas.height;
+  if (!smoothBox) {
+    smoothBox = { ...box };
+    return smoothBox;
+  }
 
-  let ratio = size / screen;
+  let a = 0.25; // плавность
 
-  if (ratio < 0.05) targetZoom = 2.2;
-  else if (ratio < 0.15) targetZoom = 1.6;
-  else targetZoom = 1.1;
+  smoothBox.x += (box.x - smoothBox.x) * a;
+  smoothBox.y += (box.y - smoothBox.y) * a;
+  smoothBox.w += (box.w - smoothBox.w) * a;
+  smoothBox.h += (box.h - smoothBox.h) * a;
 
-  zoom += (targetZoom - zoom) * 0.08;
-}
-
-// =====================
-// 🚁 ДРОН РЕЖИМ (СТАБИЛЬНЫЙ)
-function updateCameraOffset(box) {
-
-  let cx = canvas.width / 2;
-  let cy = canvas.height / 2;
-
-  let ox = box.x + box.w/2;
-  let oy = box.y + box.h/2;
-
-  camOffsetX += (ox - cx) * 0.04;
-  camOffsetY += (oy - cy) * 0.04;
-}
-
-// =====================
-function drawZoomedVideo() {
-
-  if (!video.videoWidth) return;
-
-  let vw = video.videoWidth;
-  let vh = video.videoHeight;
-
-  let zw = vw / zoom;
-  let zh = vh / zoom;
-
-  let zx = (vw - zw)/2 + camOffsetX;
-  let zy = (vh - zh)/2 + camOffsetY;
-
-  ctx.drawImage(video, zx, zy, zw, zh, 0, 0, canvas.width, canvas.height);
+  return smoothBox;
 }
 
 // =====================
@@ -198,39 +132,53 @@ async function loop() {
 
     const predictions = await model.detect(video);
 
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    drawZoomedVideo();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    let newTarget = target ? matchTarget(predictions) : null;
-
-    if (!newTarget) lostFrames++;
-    else lostFrames = 0;
-
-    if (!target || lostFrames > MAX_LOST) {
-      target = pickTarget(predictions);
-      lostFrames = 0;
-    } else if (newTarget) {
-      target = newTarget;
-    }
+    target = pickTarget(predictions);
 
     if (target) {
 
-      let [x,y,w,h] = target.bbox;
+      detectFrames++;
 
-      let f = smooth({x,y,w,h});
+      let box = smoothBoxUpdate({
+        x: target.bbox[0],
+        y: target.bbox[1],
+        w: target.bbox[2],
+        h: target.bbox[3]
+      });
 
-      updateZoom(f);
-      updateCameraOffset(f);
-
+      // 🎯 рамка
       ctx.strokeStyle = "red";
-      ctx.lineWidth = 4;
-      ctx.strokeRect(f.x,f.y,f.w,f.h);
+      ctx.lineWidth = 3;
+      ctx.strokeRect(box.x, box.y, box.w, box.h);
+
+      // 🏷 подпись
+      ctx.fillStyle = "red";
+      ctx.font = "16px Arial";
+      ctx.fillText(target.class, box.x, box.y - 8);
+
+      // 📸 фото при первом стабильном обнаружении
+      if (detectFrames === 10) {
+        takePhoto();
+      }
+
+      // 🔊 звук
+      if (Date.now() - lastSound > 2000) {
+        playSound();
+        lastSound = Date.now();
+      }
+
+      document.getElementById("status").innerText =
+        "Объект: " + target.class;
 
     } else {
+      detectFrames = 0;
+      smoothBox = null;
       document.getElementById("status").innerText = "Поиск...";
     }
 
-  } catch(e) {
+  } catch (e) {
     console.log(e);
   }
 
